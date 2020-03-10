@@ -13,7 +13,6 @@ import custom_layers
 import geometry
 import hyperlayers
 
-
 class SRNsModel(nn.Module):
     def __init__(self,
                  num_instances,
@@ -35,6 +34,11 @@ class SRNsModel(nn.Module):
         self.freeze_networks = freeze_networks
         self.fit_single_srn = fit_single_srn
 
+        self.conv_g = nn.Conv2d(256, 128, 1).cuda()
+        self.conv_phi = nn.Conv2d(256, 128, 1).cuda()
+        self.conv_theta = nn.Conv2d(256, 128, 1).cuda()
+        self.w_y = nn.Conv2d(128, 256, 1).cuda()
+        
         if self.fit_single_srn:  # Fit a single scene with a single SRN (no hypernetworks)
             self.phi = pytorch_prototyping.FCBlock(hidden_ch=self.num_hidden_units_phi,
                                                    num_hidden_layers=self.phi_layers - 2,
@@ -58,7 +62,7 @@ class SRNsModel(nn.Module):
 
         if use_unet_renderer:
             self.pixel_generator = custom_layers.DeepvoxelsRenderer(nf0=32, in_channels=self.num_hidden_units_phi,
-                                                                    input_resolution=128, img_sidelength=128)
+                                                                    input_resolution=32, img_sidelength=32)
         else:
             self.pixel_generator = pytorch_prototyping.FCBlock(hidden_ch=self.num_hidden_units_phi,
                                                                num_hidden_layers=self.rendering_layers - 1,
@@ -68,10 +72,11 @@ class SRNsModel(nn.Module):
 
         if self.freeze_networks:
             all_network_params = (self.pixel_generator.parameters()
-                                  + self.ray_marcher.parameters()
-                                  + self.hyper_phi.parameters())
+                                  , self.ray_marcher.parameters()
+                                  , self.hyper_phi.parameters())
             for param in all_network_params:
-                param.requires_grad = False
+                for param_ in param:
+                    param_.requires_grad = False
 
         # Losses
         self.l2_loss = nn.MSELoss(reduction="mean")
@@ -290,8 +295,49 @@ class SRNsModel(nn.Module):
         v = phi(points_xyz)
 
         # Translate features at ray-marched world coordinates to RGB colors.
-        novel_views = self.pixel_generator(v)
+        # novel_views = self.pixel_generator(v)  # [8, 1024, 256]
 
+        # Use attention
+        out_channels = 128
+        batch_size, _, in_channels = v.shape
+        img_sidelength = 32
+        
+        v_ = v.view(-1, img_sidelength, img_sidelength, in_channels).permute(0, 3, 1, 2).contiguous()
+         
+        g = self.conv_g(v_)
+        phi = self.conv_phi(v_)
+        theta = self.conv_theta(v_)
+        
+        g_x = g.permute(0, 2, 3, 1).view(batch_size, -1, out_channels).contiguous()
+        theta_x = theta.permute(0, 2, 3, 1).view(batch_size, -1, out_channels).contiguous()
+        phi_x = phi.view(batch_size, out_channels, -1)
+        
+        f = torch.matmul(theta_x, phi_x)
+        f_softmax = torch.softmax(f, -1)
+        y = torch.matmul(f_softmax, g_x)
+        
+        y = y.view(batch_size, out_channels, img_sidelength, img_sidelength)
+        w_y = self.w_y(y).view(batch_size, -1, in_channels)
+        
+        v = torch.add(v, w_y)
+        
+        novel_views = self.pixel_generator(v)
+        
+        # Use simlpe conv network
+        # in_channelsv.shape
+        # size = 32
+        
+        # v_ = v.reshape(-1, size, size, in_channels).permute(0, 3, 1, 2)
+        # self.conv1 = nn.Conv2d(256, 128, 3, padding=1).cuda()
+        # self.conv2 = nn.Conv2d(128, 64, 3, padding=1).cuda()
+        # self.conv3 = nn.Conv2d(64, 3, 3, padding=1).cuda()
+        
+        # v_ = self.conv1(v_)
+        # v_ = self.conv2(v_)
+        # v_ = self.conv3(v_)
+        
+        # novel_views = v_.permute(0, 2, 3, 1).reshape(-1, size**2, 3)
+        
         # Calculate normal map
         with torch.no_grad():
             batch_size = uv.shape[0]

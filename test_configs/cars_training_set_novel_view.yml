@@ -1,9 +1,10 @@
 # Configuration file for testing novel view synthesis on training set (see paper section 4, paragraph 4)
 # Datasets can be downloaded here: https://drive.google.com/drive/folders/1OkYgeRcIcLOFu1ft5mRODWNQaPJ0ps90
 
-data_root: "" # Path to cars training_test set (cars from training set with novel views).
-logging_root: ./logs/cars
-num_instances: 2433 # The number of cars that the model was trained with.
-checkpoint: '' # The path to the trained checkpoint
-img_sidelength: 128
-batch_size: 16 # This is for a GPU with 48 GB of memory. Adapt accordingly for your GPU memory.
+data_root: E:\dataset\my_cars_test # Path to cars training_test set (cars from training set with novel views).
+logging_root: ./logs/my_cars_2_test
+num_instances: 100  # 2151 # The number of cars that the model was trained with.
+checkpoint: logs/my_cars_2/checkpoints # The path to the trained checkpoint
+img_sidelength: 64
+batch_size: 64 # This is for a GPU with 48 GB of memory. Adapt accordingly for your GPU memory.
+embedding_size: 32
